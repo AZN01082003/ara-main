@@ -1,12 +1,12 @@
 """
 Découpage sémantique du texte en chunks
+(mode générique + mode financier)
 """
 
 import json
 import re
 from pathlib import Path
-from typing import List, Dict
-#from langchain.text_splitter import RecursiveCharacterTextSplitter
+from typing import List, Dict, Optional
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 import spacy
@@ -179,7 +179,7 @@ class SemanticChunker:
         """Calcule des statistiques sur les chunks"""
         lengths = [chunk['length'] for chunk in chunks]
         word_counts = [chunk['word_count'] for chunk in chunks]
-        
+
         return {
             'total_chunks': len(chunks),
             'avg_length': sum(lengths) / len(lengths),
@@ -188,3 +188,228 @@ class SemanticChunker:
             'avg_words': sum(word_counts) / len(word_counts),
             'total_words': sum(word_counts)
         }
+
+
+# ==============================================================
+# Découpeur spécialisé pour les rapports financiers
+# ==============================================================
+
+class FinancialChunker(SemanticChunker):
+    """
+    Découpe le texte de rapports financiers en chunks intelligents.
+
+    Améliorations vs SemanticChunker :
+    - Reconnaît les sections financières (Bilan, CdR, Flux, etc.)
+    - Garde les blocs tableau Markdown intacts (atomiques, non découpés)
+    - Tague chaque chunk : 'table' | 'narrative'
+    - Chunk size plus grand par défaut (tableaux = beaucoup de texte)
+    """
+
+    # Patterns de sections typiques des rapports financiers (FR + EN)
+    FINANCIAL_SECTION_PATTERNS = [
+        r'\n\s*(Bilan|BILAN)\s*\n',
+        r'\n\s*(Compte de résultat|COMPTE DE RÉSULTAT|Compte de Résultat)\s*\n',
+        r'\n\s*(Flux de trésorerie|FLUX DE TRÉSORERIE|Tableau des flux)\s*\n',
+        r'\n\s*(État des capitaux propres|CAPITAUX PROPRES|Capitaux propres)\s*\n',
+        r'\n\s*(Notes annexes|NOTES ANNEXES|Annexes|ANNEXES)\s*\n',
+        r'\n\s*(Rapport de gestion|RAPPORT DE GESTION)\s*\n',
+        r'\n\s*(Faits marquants|FAITS MARQUANTS)\s*\n',
+        r'\n\s*(Perspectives|PERSPECTIVES|Outlook)\s*\n',
+        r'\n\s*(Résultats|RÉSULTATS|Results)\s*\n',
+        r'\n\s*(Chiffre d[\'']affaires|CHIFFRE D[\'']AFFAIRES|Revenus|REVENUS)\s*\n',
+        r'\n\s*(Performance|PERFORMANCE)\s*\n',
+        r'\n\s*(Résumé exécutif|RÉSUMÉ EXÉCUTIF|Executive Summary)\s*\n',
+        r'\n\s*(Risques|RISQUES|Risk Factors)\s*\n',
+        r'\n\s*(Gouvernance|GOUVERNANCE|Corporate Governance)\s*\n',
+        r'\n\s*(Dividendes|DIVIDENDES)\s*\n',
+        r'\n\s*(Endettement|ENDETTEMENT|Dette|DETTE)\s*\n',
+        r'\n\s*(Trésorerie|TRÉSORERIE)\s*\n',
+        # Sections numérotées génériques (1. Titre, 2.1 Titre…)
+        r'\n\s*(\d+\.?\d*\s+[A-ZÀ-Ÿ][A-Za-zÀ-ÿ\s]{3,})\s*\n',
+    ]
+
+    # Regex pour détecter les balises TABLE insérées par PDFExtractor
+    _TABLE_BLOCK_RE = re.compile(
+        r'\[TABLE [^\]]+\].*?\[/TABLE [^\]]+\]',
+        re.DOTALL
+    )
+
+    def __init__(self, chunk_size: int = 800, overlap: int = 100, language: str = 'fr'):
+        """
+        Args:
+            chunk_size: Taille cible d'un chunk (en caractères).
+                        Plus grand que le défaut car les tableaux sont denses.
+            overlap: Chevauchement entre chunks narratifs consécutifs.
+            language: 'fr' (défaut pour rapports FR) ou 'en'.
+        """
+        super().__init__(chunk_size=chunk_size, overlap=overlap, language=language)
+
+        self._financial_pattern = re.compile(
+            '|'.join(self.FINANCIAL_SECTION_PATTERNS)
+        )
+
+    # ------------------------------------------------------------------
+    # Point d'entrée principal
+    # ------------------------------------------------------------------
+
+    def chunk_financial_text(self, text: str) -> List[Dict]:
+        """
+        Découpe un texte financier enrichi (avec balises [TABLE]…[/TABLE]).
+
+        Stratégie :
+        1. Séparer les blocs tableau des blocs texte narratif
+        2. Découper le texte narratif par sections financières détectées
+        3. Garder les tableaux comme chunks atomiques
+        4. Réunir le tout dans l'ordre de position dans le document
+
+        Returns:
+            Liste de chunks avec métadonnées (chunk_type, section…)
+        """
+        text_blocks, table_blocks = self._split_tables_from_text(text)
+
+        narrative_chunks = self._chunk_narrative_blocks(text_blocks)
+        table_chunk_objects = self._create_table_chunks(table_blocks)
+
+        all_raw = narrative_chunks + table_chunk_objects
+        all_raw.sort(key=lambda x: x['position'])
+
+        return self._finalize_chunks(all_raw)
+
+    # ------------------------------------------------------------------
+    # Séparation texte / tableaux
+    # ------------------------------------------------------------------
+
+    def _split_tables_from_text(self, text: str):
+        """Sépare le texte en blocs narratifs et blocs tableau."""
+        table_blocks = []
+        text_blocks = []
+        last_end = 0
+
+        for match in self._TABLE_BLOCK_RE.finditer(text):
+            before = text[last_end:match.start()]
+            if before.strip():
+                text_blocks.append({'content': before, 'position': last_end})
+            table_blocks.append({'content': match.group(), 'position': match.start()})
+            last_end = match.end()
+
+        remaining = text[last_end:]
+        if remaining.strip():
+            text_blocks.append({'content': remaining, 'position': last_end})
+
+        return text_blocks, table_blocks
+
+    # ------------------------------------------------------------------
+    # Chunking du narratif financier
+    # ------------------------------------------------------------------
+
+    def _chunk_narrative_blocks(self, text_blocks: list) -> list:
+        """Découpe chaque bloc narratif par sections financières."""
+        chunks = []
+
+        for block in text_blocks:
+            raw_text = block['content']
+            sections = self._detect_financial_sections(raw_text)
+
+            if sections:
+                for section in sections:
+                    self._chunk_section(section, block['position'], chunks)
+            else:
+                # Pas de sections détectées → découpage récursif classique
+                for sub in self.splitter.split_text(raw_text):
+                    chunks.append({
+                        'content': sub,
+                        'type': 'narrative',
+                        'section': None,
+                        'position': block['position'],
+                    })
+
+        return chunks
+
+    def _detect_financial_sections(self, text: str) -> list:
+        """Identifie les sections financières dans un bloc de texte."""
+        matches = list(self._financial_pattern.finditer(text))
+        if not matches:
+            return []
+
+        sections = []
+        for i, match in enumerate(matches):
+            start = match.start()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+            sections.append({
+                'title': match.group().strip(),
+                'content': text[start:end].strip(),
+                'start': start,
+            })
+        return sections
+
+    def _chunk_section(self, section: dict, block_offset: int, out: list):
+        """Découpe une section (potentiellement longue) en sous-chunks."""
+        content = section['content']
+        pos = block_offset + section['start']
+
+        if len(content) <= self.chunk_size * 1.5:
+            out.append({
+                'content': content,
+                'type': 'narrative',
+                'section': section['title'],
+                'position': pos,
+            })
+        else:
+            for sub in self.splitter.split_text(content):
+                out.append({
+                    'content': sub,
+                    'type': 'narrative',
+                    'section': section['title'],
+                    'position': pos,
+                })
+
+    # ------------------------------------------------------------------
+    # Chunks atomiques pour les tableaux
+    # ------------------------------------------------------------------
+
+    def _create_table_chunks(self, table_blocks: list) -> list:
+        """Crée un chunk atomique (non découpé) par bloc tableau."""
+        return [
+            {
+                'content': block['content'],
+                'type': 'table',
+                'section': None,
+                'position': block['position'],
+            }
+            for block in table_blocks
+        ]
+
+    # ------------------------------------------------------------------
+    # Finalisation et métadonnées
+    # ------------------------------------------------------------------
+
+    def _finalize_chunks(self, raw_chunks: list) -> List[Dict]:
+        """Attribue les IDs et métadonnées finales à chaque chunk."""
+        result = []
+        for i, chunk in enumerate(raw_chunks):
+            result.append({
+                'chunk_id': f'chunk_{i:04d}',
+                'text': chunk['content'],
+                'length': len(chunk['content']),
+                'word_count': len(chunk['content'].split()),
+                'metadata': {
+                    'position': i,
+                    'total_chunks': len(raw_chunks),
+                    'chunk_type': chunk.get('type', 'narrative'),
+                    'section': chunk.get('section'),
+                    'is_table': chunk.get('type') == 'table',
+                },
+            })
+        return result
+
+    # ------------------------------------------------------------------
+    # Surcharge pour compatibilité avec le pipeline générique
+    # ------------------------------------------------------------------
+
+    def chunk_text(self, text: str) -> List[Dict]:
+        """
+        Surcharge de SemanticChunker.chunk_text().
+        Appelle chunk_financial_text() pour bénéficier du traitement
+        spécialisé même quand le code appelant n'est pas modifié.
+        """
+        return self.chunk_financial_text(text)

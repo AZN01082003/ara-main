@@ -1,7 +1,10 @@
 """
 Pipeline RAG complet avec LLM (support Gemini)
+Mode financier : prompt spécialisé + remplissage de tables prédéfinies
 """
 
+import json
+import re
 import os
 from typing import List, Dict, Optional
 from src.retrieval.hybrid_retriever import HybridRetriever
@@ -142,49 +145,54 @@ class RAGPipeline:
             raise ValueError(f"Provider non supporté: {self.llm_provider}")
     
     def query(
-        self, 
-        question: str, 
+        self,
+        question: str,
         top_k: int = 5,
-        return_sources: bool = True
+        return_sources: bool = True,
+        mode: str = "standard",
     ) -> Dict:
         """
-        Effectue une requête RAG complète
-        
+        Effectue une requête RAG complète.
+
         Args:
             question: Question de l'utilisateur
             top_k: Nombre de chunks à récupérer
             return_sources: Retourner les sources utilisées
-            
+            mode: "standard" (articles scientifiques) ou "financial" (rapports financiers)
+
         Returns:
             Dictionnaire avec 'answer', 'sources', 'metadata'
         """
-        
-        # --- Étape 1 : Retrieval (recherche) ---
+
+        # --- Étape 1 : Retrieval ---
         retrieved_docs = self.retriever.retrieve(question, top_k=top_k)
-        
-        # --- Étape 2 : Construction du contexte ---
+
+        # --- Étape 2 : Contexte ---
         context = self._build_context(retrieved_docs)
-        
-        # --- Étape 3 : Construction du prompt ---
-        prompt = self._build_prompt(question, context)
-        
-        # --- Étape 4 : Génération avec le LLM ---
+
+        # --- Étape 3 : Prompt (selon le mode) ---
+        if mode == "financial":
+            prompt = self._build_financial_prompt(question, context)
+        else:
+            prompt = self._build_prompt(question, context)
+
+        # --- Étape 4 : Génération ---
         answer = self._generate_answer(prompt)
-        
-        # --- Résultat ---
+
         result = {
             'question': question,
             'answer': answer,
             'metadata': {
                 'num_sources': len(retrieved_docs),
                 'llm_provider': self.llm_provider,
-                'model': self.model_name
+                'model': self.model_name,
+                'mode': mode,
             }
         }
-        
+
         if return_sources:
             result['sources'] = self._format_sources(retrieved_docs)
-        
+
         return result
     
     def _build_context(self, retrieved_docs: List[Dict]) -> str:
@@ -228,6 +236,166 @@ ANSWER:"""
         
         return prompt
     
+    def _build_financial_prompt(self, question: str, context: str) -> str:
+        """
+        Prompt spécialisé pour les rapports financiers.
+        Instruit le LLM à lire les tableaux Markdown, les valeurs
+        numériques et les symboles financiers.
+        """
+        system_message = (
+            "Tu es un analyste financier expert. Tu analyses des rapports financiers "
+            "(bilans, comptes de résultat, flux de trésorerie, notes annexes).\n"
+            "Tu dois répondre aux questions en te basant UNIQUEMENT sur le contexte fourni.\n\n"
+            "Directives :\n"
+            "- Les tableaux financiers sont en format Markdown (| col1 | col2 | …)\n"
+            "- Lis attentivement les valeurs numériques, les variations (%), les unités "
+            "(€, M€, k€, $)\n"
+            "- Cite les chiffres précis du rapport quand c'est possible\n"
+            "- Si une information est absente du contexte, dis-le clairement\n"
+            "- Présente les données de manière structurée (listes, tableaux) quand pertinent\n"
+            "- Tiens compte du contexte narratif ET des tableaux chiffrés\n"
+            "- Ne spécule pas, ne complète pas avec des connaissances externes"
+        )
+
+        return (
+            f"{system_message}\n\n"
+            f"CONTEXTE DU RAPPORT FINANCIER :\n{context}\n\n"
+            f"QUESTION :\n{question}\n\n"
+            f"RÉPONSE :"
+        )
+
+    # ------------------------------------------------------------------
+    # Remplissage de tables prédéfinies (cas d'usage principal)
+    # ------------------------------------------------------------------
+
+    def fill_predefined_table(
+        self,
+        table_template: Dict,
+        top_k: int = 5,
+    ) -> Dict:
+        """
+        Remplit une table prédéfinie à partir du rapport financier via RAG.
+
+        Le LLM est appelé une fois par ligne (indicateur) pour extraire les
+        valeurs correspondant à chaque colonne (périodes, exercices…).
+
+        Args:
+            table_template: {
+                "table_name": str,          # ex. "Compte de résultat simplifié"
+                "columns": [str, ...],       # ex. ["Indicateur", "2023", "2022", "Variation"]
+                "rows": [str, ...]           # ex. ["Chiffre d'affaires", "EBITDA", "Résultat net"]
+            }
+            top_k: Chunks RAG récupérés par requête.
+
+        Returns:
+            {
+                "table_name": str,
+                "columns": [str, ...],
+                "data": { row_name: { col: value, … }, … }
+            }
+        """
+        table_name = table_template.get("table_name", "Tableau financier")
+        columns = table_template.get("columns", [])
+        rows = table_template.get("rows", [])
+
+        if not columns or not rows:
+            raise ValueError("table_template doit contenir 'columns' et 'rows'.")
+
+        # Colonnes de données = toutes sauf la première ("Indicateur")
+        data_columns = columns[1:] if len(columns) > 1 else columns
+
+        filled_table = {
+            "table_name": table_name,
+            "columns": columns,
+            "data": {},
+        }
+
+        print(f"\n   📋 Remplissage de la table : «{table_name}»")
+        print(f"      {len(rows)} indicateurs × {len(data_columns)} colonnes\n")
+
+        for row_name in rows:
+            # Requête RAG ciblée sur l'indicateur
+            query = f"{row_name} {table_name}"
+            retrieved = self.retriever.retrieve(query, top_k=top_k)
+            context = self._build_context(retrieved)
+
+            prompt = self._build_table_fill_prompt(
+                row_indicator=row_name,
+                data_columns=data_columns,
+                context=context,
+                table_name=table_name,
+            )
+
+            raw_answer = self._generate_answer(prompt)
+            parsed = self._parse_table_fill_response(raw_answer, data_columns)
+            filled_table["data"][row_name] = parsed
+
+            print(f"      ✓ {row_name} : {parsed}")
+
+        return filled_table
+
+    def _build_table_fill_prompt(
+        self,
+        row_indicator: str,
+        data_columns: List[str],
+        context: str,
+        table_name: str,
+    ) -> str:
+        """Prompt d'extraction de valeurs pour une ligne de table."""
+        cols_str = ", ".join(f'"{c}"' for c in data_columns)
+        json_template = ", ".join(f'"{c}": "valeur ou N/A"' for c in data_columns)
+
+        return (
+            f"Tu es un analyste financier. Extrais les valeurs pour l'indicateur "
+            f'"{row_indicator}" depuis le contexte du rapport financier ci-dessous.\n\n'
+            f"CONTEXTE :\n{context}\n\n"
+            f'TÂCHE : Extrais les valeurs de "{row_indicator}" dans la table '
+            f'"{table_name}" pour les colonnes : {cols_str}.\n\n'
+            f"Réponds UNIQUEMENT en JSON valide, sans texte supplémentaire :\n"
+            f"{{{json_template}}}\n\n"
+            f"Si une valeur n'est pas trouvée, mets \"N/A\".\n\nJSON :"
+        )
+
+    def _parse_table_fill_response(self, raw_response: str, data_columns: List[str]) -> Dict:
+        """
+        Parse la réponse JSON du LLM.
+        Fallback sur N/A si le JSON est invalide ou incomplet.
+        """
+        json_match = re.search(r'\{[^{}]+\}', raw_response, re.DOTALL)
+        if json_match:
+            try:
+                parsed = json.loads(json_match.group())
+                # S'assurer que toutes les colonnes sont présentes
+                return {col: parsed.get(col, "N/A") for col in data_columns}
+            except json.JSONDecodeError:
+                pass
+        # Fallback
+        return {col: "N/A" for col in data_columns}
+
+    def format_filled_table_as_markdown(self, filled_table: Dict) -> str:
+        """
+        Convertit un tableau rempli (issu de fill_predefined_table) en Markdown.
+
+        Returns:
+            Chaîne Markdown prête à afficher ou à sauvegarder.
+        """
+        table_name = filled_table.get("table_name", "Tableau")
+        columns = filled_table.get("columns", [])
+        data = filled_table.get("data", {})
+
+        lines = [f"## {table_name}\n"]
+
+        # En-tête
+        lines.append("| " + " | ".join(columns) + " |")
+        lines.append("|" + "|".join(["---"] * len(columns)) + "|")
+
+        # Données
+        for row_name, values in data.items():
+            row_cells = [row_name] + [str(values.get(col, "N/A")) for col in columns[1:]]
+            lines.append("| " + " | ".join(row_cells) + " |")
+
+        return "\n".join(lines)
+
     def _generate_answer(self, prompt: str) -> str:
         """Génère la réponse avec le LLM"""
         
