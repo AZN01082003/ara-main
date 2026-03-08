@@ -37,7 +37,7 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import pdfplumber
+import fitz  # PyMuPDF
 
 from src.extraction.pdf_extractor import PDFExtractor
 from src.extraction.pdf_structure_scanner import PDFStructureScanner
@@ -266,27 +266,26 @@ class TargetedFinancialPipeline:
         parts = []
         page_set = set(pages)
 
-        with pdfplumber.open(self.pdf_path) as pdf:
-            for page_num, page in enumerate(pdf.pages):
+        with fitz.open(str(self.pdf_path)) as doc:
+            for page_num, page in enumerate(doc):
                 if (page_num + 1) not in page_set:
                     continue
 
                 page_parts = [f"\n--- Page {page_num + 1} ---\n"]
 
                 # Texte narratif
-                page_text = page.extract_text() or ""
+                page_text = page.get_text("text") or ""
                 if page_text.strip():
                     page_parts.append(page_text)
 
                 # Tableaux → Markdown structuré
-                page_tables = page.extract_tables()
-                if page_tables:
-                    for t_idx, table in enumerate(page_tables):
-                        md = self.extractor._table_to_markdown(
-                            table, page_num + 1, t_idx + 1
-                        )
-                        if md:
-                            page_parts.append(md)
+                page_tables = self.extractor._get_page_tables(page)
+                for t_idx, table in enumerate(page_tables):
+                    md = self.extractor._table_to_markdown(
+                        table, page_num + 1, t_idx + 1
+                    )
+                    if md:
+                        page_parts.append(md)
 
                 parts.append("\n".join(page_parts))
 

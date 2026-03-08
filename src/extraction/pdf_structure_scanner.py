@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import fitz  # PyMuPDF
-import pdfplumber
 
 
 class PDFStructureScanner:
@@ -145,16 +144,12 @@ class PDFStructureScanner:
         """
         raw_headings = []  # [(page, title, level)]
 
-        with pdfplumber.open(self.pdf_path) as pdf:
-            for page_num, page in enumerate(pdf.pages):
+        with fitz.open(str(self.pdf_path)) as doc:
+            for page_num, page in enumerate(doc):
                 # Extraire seulement les premières lignes (top 15% de la page)
-                cropped = page.crop((
-                    0,
-                    0,
-                    page.width,
-                    page.height * 0.15,
-                ))
-                snippet = (cropped.extract_text() or "").strip()
+                r = page.rect
+                clip = fitz.Rect(r.x0, r.y0, r.x1, r.y0 + r.height * 0.15)
+                snippet = page.get_text("text", clip=clip).strip()
                 if not snippet:
                     continue
 
