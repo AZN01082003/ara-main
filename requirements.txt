@@ -1,0 +1,37 @@
+# ─── Web API ──────────────────────────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+pydantic>=2.6.0
+
+# ─── LLM Providers (au moins un requis) ──────────────────────────────────────
+google-generativeai>=0.5.0        # défaut — Gemini
+openai>=1.30.0                    # optionnel
+groq>=0.8.0                       # optionnel
+huggingface-hub>=0.22.0           # optionnel
+ollama>=0.2.0                     # optionnel (local)
+
+# ─── Extraction PDF ───────────────────────────────────────────────────────────
+pdfplumber>=0.11.0
+PyMuPDF>=1.24.0                   # fitz — scan structurel
+pdf2image>=1.17.0                 # conversion pages → images (OCR)
+pytesseract>=0.3.10               # OCR texte
+Pillow>=10.3.0
+
+# ─── Embeddings & Retrieval ───────────────────────────────────────────────────
+sentence-transformers>=2.7.0
+chromadb>=0.5.0
+rank-bm25>=0.2.2
+numpy>=1.26.0
+
+# ─── NLP & Chunking ──────────────────────────────────────────────────────────
+spacy>=3.7.0
+langchain-text-splitters>=0.2.0
+unidecode>=1.3.8
+
+# ─── Utilitaires ─────────────────────────────────────────────────────────────
+tqdm>=4.66.0
+python-dotenv>=1.0.0
+
+# ─── OCR formules LaTeX (optionnel) ──────────────────────────────────────────
+# pix2tex>=0.1.2

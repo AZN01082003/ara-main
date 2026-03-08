@@ -1,0 +1,190 @@
+# FinRAG Evaluator
+
+Interface web pour **uploader un rapport financier PDF** et évaluer la qualité de compréhension du pipeline RAG : extraction de chiffres, tableaux financiers, indicateurs et contexte.
+
+---
+
+## Prérequis
+
+| Outil | Version minimale |
+|---|---|
+| Python | 3.10 + |
+| VS Code | dernière version |
+| Tesseract OCR | 4.x ([installer](https://github.com/tesseract-ocr/tesseract#installing-tesseract)) |
+| Clé API Gemini | [console Google AI Studio](https://aistudio.google.com/app/apikey) |
+
+> **Windows** : installez aussi [Poppler](https://github.com/oschwartz10612/poppler-windows/releases) et ajoutez `bin/` au `PATH` (requis par `pdf2image`).
+
+---
+
+## Installation rapide
+
+### 1 — Cloner et ouvrir dans VS Code
+
+```bash
+git clone <url-du-repo>
+cd ara-main
+code .
+```
+
+### 2 — Créer et activer un environnement virtuel
+
+```bash
+# Créer le venv (une seule fois)
+python -m venv .venv
+
+# Activer — Linux / macOS
+source .venv/bin/activate
+
+# Activer — Windows PowerShell
+.venv\Scripts\Activate.ps1
+```
+
+> VS Code détecte `.venv` automatiquement. Si ce n'est pas le cas :  
+> `Ctrl+Shift+P` → **Python: Select Interpreter** → choisir `.venv`
+
+### 3 — Installer les dépendances
+
+```bash
+pip install -r requirements.txt
+```
+
+### 4 — Télécharger le modèle spaCy
+
+```bash
+python -m spacy download fr_core_news_sm
+```
+
+### 5 — Configurer la clé API Gemini
+
+Créez un fichier `.env` à la racine du projet :
+
+```dotenv
+GEMINI_API_KEY=AIza...votre_clé...
+```
+
+> Le serveur lit `GEMINI_API_KEY` via `os.getenv()`. Ne commitez jamais ce fichier.
+
+---
+
+## Lancer le serveur
+
+### Option A — Terminal VS Code intégré
+
+```bash
+uvicorn api.server:app --reload --port 8000
+```
+
+Ouvrez ensuite **http://localhost:8000** dans votre navigateur.
+
+### Option B — Configuration de lancement VS Code
+
+Créez `.vscode/launch.json` :
+
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "FinRAG — Serveur API",
+      "type": "python",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["api.server:app", "--reload", "--port", "8000"],
+      "envFile": "${workspaceFolder}/.env",
+      "console": "integratedTerminal"
+    }
+  ]
+}
+```
+
+Appuyez sur **F5** pour démarrer.
+
+---
+
+## Utiliser l'interface
+
+### Onglet Upload
+Glissez-déposez un rapport financier PDF (bilan annuel, rapport semestriel, etc.).  
+Le plan du document (sections + plages de pages) s'affiche immédiatement.
+
+### Onglet Interrogation
+Posez des questions en langage naturel. Le système extrait uniquement les pages pertinentes (**lazy extraction**) et affiche :
+- La réponse générée (Markdown rendu)
+- Les pages ciblées + latence
+- Les sources dépliables
+- La progression du cache d'extraction
+
+### Onglet Tableaux
+Choisissez un modèle prédéfini ou construisez votre propre table :
+
+| Modèle | Lignes extraites |
+|---|---|
+| Compte de résultat | CA, EBITDA, EBIT, Résultat net, Marge |
+| Bilan condensé | Actif, Passif, Capitaux propres, Dettes |
+| Flux de trésorerie | Opérationnel, Investissement, Financement |
+| Ratios financiers | Marges, endettement, liquidité |
+
+Export CSV disponible après extraction.
+
+### Onglet Évaluation
+Lance une **suite de 12 questions** réparties en 4 catégories pondérées.  
+Chaque réponse est scorée **0–10 par le LLM**. Résultats en temps réel :
+- Radar Chart par catégorie
+- Score global pondéré + mention (Excellent → Très insuffisant)
+- Détail accordéon par question (réponse, score, pages, latence)
+
+| Catégorie | Poids | Ce qui est testé |
+|---|---|---|
+| Extraction numérique | ×1.5 | Précision des chiffres bruts |
+| **Tableaux financiers** | **×3.0** | Structuration et complétude des tables |
+| Indicateurs financiers | ×2.0 | EBITDA, marges, endettement |
+| Contexte et analyse | ×1.0 | Risques, perspectives, commentaires |
+
+---
+
+## Structure du projet
+
+```
+ara-main/
+├── api/
+│   ├── server.py          # Backend FastAPI (endpoints + suite d'évaluation)
+│   └── static/
+│       └── index.html     # Frontend JS (4 onglets, Chart.js, Markdown)
+├── src/
+│   ├── extraction/        # PDFExtractor, PDFStructureScanner
+│   ├── preprocessing/     # TextCleaner, Chunker (financier)
+│   ├── embeddings/        # SentenceTransformer wrapper
+│   ├── indexing/          # ChromaDB + BM25
+│   ├── retrieval/         # HybridRetriever (sémantique + BM25)
+│   ├── routing/           # SectionRouter (pages ciblées)
+│   └── rag/
+│       ├── rag_pipeline.py        # Pipeline principal (query, fill_table, score)
+│       └── targeted_pipeline.py   # Pipeline ciblé (lazy extraction)
+├── main_financial.py      # CLI pour tests rapides
+├── requirements.txt
+├── .env                   # ← à créer (non versionné)
+└── README.md
+```
+
+---
+
+## Variables d'environnement
+
+| Variable | Défaut | Description |
+|---|---|---|
+| `GEMINI_API_KEY` | — | **Requis** — clé API Google Gemini |
+| `PORT` | `8000` | Port d'écoute (uvicorn) |
+
+---
+
+## Dépannage
+
+| Erreur | Solution |
+|---|---|
+| `ModuleNotFoundError: fitz` | `pip install PyMuPDF` |
+| `tesseract is not installed` | Installer Tesseract + ajouter au PATH |
+| `poppler not found` | Installer Poppler (Windows) ou `apt install poppler-utils` |
+| `fr_core_news_sm not found` | `python -m spacy download fr_core_news_sm` |
+| Erreur 429 Gemini | Quota dépassé — attendre ou changer de clé |
+| Port 8000 déjà utilisé | `uvicorn api.server:app --port 8001` |
