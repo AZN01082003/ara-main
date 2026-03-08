@@ -31,6 +31,7 @@ from src.indexing.vector_store import VectorStore
 from src.indexing.bm25_index import BM25Index
 from src.retrieval.hybrid_retriever import HybridRetriever
 from src.rag.rag_pipeline import RAGPipeline
+from src.rag.targeted_pipeline import TargetedFinancialPipeline
 
 
 # ======================================================================
@@ -294,5 +295,104 @@ def main():
     print("=" * 65 + "\n")
 
 
+def main_targeted():
+    """
+    Démo du pipeline ciblé (lazy extraction).
+
+    Différence clé vs main() :
+      - Aucune extraction n'est faite au démarrage.
+      - Le scan structurel (~50 ms) identifie le plan du document.
+      - Chaque requête déclenche l'extraction uniquement des pages pertinentes.
+      - Les pages déjà traitées sont mises en cache → latence décroissante.
+
+    Flux d'une requête :
+      scan structurel → route query → extract (N pages) → embed → index → RAG
+    """
+    print("=" * 65)
+    print("  PIPELINE RAG FINANCIER — EXTRACTION CIBLÉE (LAZY)")
+    print("=" * 65)
+    print("  Principe : on extrait UNIQUEMENT les pages pertinentes à")
+    print("  chaque requête, identifiées avant toute extraction.")
+    print("=" * 65)
+
+    # ── Instanciation du LLM seul (sans pré-extraction) ─────────────────
+    print("\n🤖 Initialisation du LLM (sans pré-extraction du PDF)…")
+    rag = RAGPipeline(
+        retriever=None,          # sera branché dynamiquement
+        llm_provider="gemini",
+        model_name="gemini-2.5-flash",
+        api_key=GEMINI_API_KEY,
+        temperature=0.2,
+        max_tokens=2000,
+    )
+
+    # ── Création du pipeline ciblé ───────────────────────────────────────
+    # Le scan structurel a lieu ici (~50 ms), PAS l'extraction complète
+    Path("outputs").mkdir(parents=True, exist_ok=True)
+    pipeline = TargetedFinancialPipeline(
+        pdf_path=PDF_PATH,
+        rag_pipeline=rag,
+        embedding_model=EMBEDDING_MODEL,
+        chunk_size=800,
+        overlap=100,
+        language="fr",
+        top_k=5,
+        output_dir="outputs",
+    )
+
+    # ── TEST A : Questions ciblées ───────────────────────────────────────
+    print("\n" + "=" * 65)
+    print("TEST A — Requêtes ciblées (extraction lazy par requête)")
+    print("=" * 65)
+
+    for i, question in enumerate(TEST_QUESTIONS_FINANCIAL, 1):
+        print(f"\n{'─' * 65}")
+        print(f"Question {i}/{len(TEST_QUESTIONS_FINANCIAL)}")
+        print(f"❓ {question}")
+
+        result = pipeline.query(question, mode="financial")
+
+        print(f"\n💡 RÉPONSE :\n{result['answer']}")
+        print(f"\n   ⏱  Routage : {result['routing_ms']} ms | "
+              f"Total : {result['total_ms']} ms | "
+              f"Pages ciblées : {len(result['targeted_pages'])}")
+
+        stats = pipeline.get_cache_stats()
+        print(f"   📊 Cache : {stats['indexed_pages']}/{stats['total_pages']} pages "
+              f"({stats['coverage_pct']} %) — {stats['total_chunks']} chunks")
+
+        if i < len(TEST_QUESTIONS_FINANCIAL):
+            time.sleep(1)
+
+    # ── TEST B : Table prédéfinie avec ciblage par indicateur ────────────
+    print("\n" + "=" * 65)
+    print("TEST B — Table prédéfinie (extraction ciblée par indicateur)")
+    print("=" * 65)
+
+    filled = pipeline.fill_predefined_table(PREDEFINED_TABLE)
+    md_table = rag.format_filled_table_as_markdown(filled)
+    print(f"\n{md_table}")
+
+    out_table = f"outputs/{Path(PDF_PATH).stem}_filled_targeted.md"
+    with open(out_table, "w", encoding="utf-8") as f:
+        f.write(md_table)
+    print(f"\n   💾 Table sauvegardée : {out_table}")
+
+    # ── Résumé final ─────────────────────────────────────────────────────
+    stats = pipeline.get_cache_stats()
+    print("\n" + "=" * 65)
+    print("✅ PIPELINE CIBLÉ TERMINÉ")
+    print("=" * 65)
+    print(f"\n   Pages extraites  : {stats['indexed_pages']} / {stats['total_pages']} "
+          f"({stats['coverage_pct']} % du document)")
+    print(f"   Chunks indexés   : {stats['total_chunks']}")
+    print(f"   Économie         : {100 - stats['coverage_pct']:.1f} % du document non extrait\n")
+    print("=" * 65 + "\n")
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    if "--targeted" in sys.argv:
+        main_targeted()
+    else:
+        main()
