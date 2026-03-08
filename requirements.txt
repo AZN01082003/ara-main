@@ -11,6 +11,11 @@ groq>=0.8.0                       # optionnel
 huggingface-hub>=0.22.0           # optionnel
 ollama>=0.2.0                     # optionnel (local)
 
+# ─── Compatibilité Python 3.10+ ──────────────────────────────────────────────
+# pdfminer.six (dep de pdfplumber) embarque cryptography ; forcer >=41 évite
+# "PyO3 modules compiled for CPython 3.8 or older" sur Python 3.10/3.11.
+cryptography>=41.0.0
+
 # ─── Extraction PDF ───────────────────────────────────────────────────────────
 pdfplumber>=0.11.0
 PyMuPDF>=1.24.0                   # fitz — scan structurel

@@ -8,7 +8,7 @@ Interface web pour **uploader un rapport financier PDF** et évaluer la qualité
 
 | Outil | Version minimale |
 |---|---|
-| Python | 3.10 + |
+| Python | **3.11** recommandé (3.10 fonctionne, 3.8 non supporté) |
 | VS Code | dernière version |
 | Tesseract OCR | 4.x ([installer](https://github.com/tesseract-ocr/tesseract#installing-tesseract)) |
 | Clé API Gemini | [console Google AI Studio](https://aistudio.google.com/app/apikey) |
@@ -182,9 +182,31 @@ ara-main/
 
 | Erreur | Solution |
 |---|---|
+| `PyO3 modules compiled for CPython 3.8 or older` | `pip install --upgrade cryptography` (voir ci-dessous) |
 | `ModuleNotFoundError: fitz` | `pip install PyMuPDF` |
 | `tesseract is not installed` | Installer Tesseract + ajouter au PATH |
 | `poppler not found` | Installer Poppler (Windows) ou `apt install poppler-utils` |
 | `fr_core_news_sm not found` | `python -m spacy download fr_core_news_sm` |
 | Erreur 429 Gemini | Quota dépassé — attendre ou changer de clé |
 | Port 8000 déjà utilisé | `uvicorn api.server:app --port 8001` |
+
+### Erreur PyO3 / cryptography (Python 3.10+)
+
+Si vous obtenez :
+```
+ImportError: PyO3 modules compiled for CPython 3.8 or older may only be initialized once per interpreter process
+```
+
+`pdfplumber` dépend de `pdfminer.six` qui lui-même dépend de `cryptography`.
+Une ancienne version de `cryptography` (compilée pour Python ≤ 3.8) est incompatible avec Python 3.10/3.11. Corrigez avec :
+
+```bash
+pip install --upgrade cryptography
+# puis relancez :
+uvicorn api.server:app --reload --port 8000
+```
+
+> Si l'erreur persiste, vérifiez que vous n'avez **pas** Python 3.8 actif dans votre venv :
+> ```bash
+> python --version   # doit afficher 3.10 ou 3.11
+> ```
