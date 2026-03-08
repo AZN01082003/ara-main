@@ -44,7 +44,7 @@ class PDFStructureScanner:
         (1, re.compile(
             r'^(Bilan|Compte de résultat|Flux de trésorerie|État des capitaux propres|'
             r'Notes annexes|Rapport de gestion|Faits marquants|Perspectives|Résultats|'
-            r'Chiffre d[\'']affaires|Revenus|Performance|Résumé exécutif|Executive Summary|'
+            r"Chiffre d['']affaires|Revenus|Performance|Résumé exécutif|Executive Summary|"
             r'Risques|Gouvernance|Dividendes|Endettement|Trésorerie|'
             r'Balance Sheet|Income Statement|Cash Flow|Equity|Revenue|'
             r'Risk Factors|Corporate Governance|Dividends)$',
