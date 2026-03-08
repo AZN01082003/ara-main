@@ -193,7 +193,7 @@ ara-main/
 
 | Erreur | Solution |
 |---|---|
-| `PyO3 modules compiled for CPython 3.8 or older` | `pip install "pdfplumber==0.7.6" "pdfminer.six==20211018"` — voir ci-dessous |
+| `PyO3 modules compiled for CPython 3.8 or older` | `pip install "pdfplumber==0.7.6" "pdfminer.six==20211012"` — voir ci-dessous |
 | `ModuleNotFoundError: fitz` | `pip install PyMuPDF` |
 | `tesseract is not installed` | Installer Tesseract + ajouter au PATH |
 | `poppler not found` | Installer Poppler (Windows) ou `apt install poppler-utils` |
@@ -217,10 +217,10 @@ un bug et refuse de charger ces wheels.
 **Fix — réinstaller les seuls paquets concernés** :
 
 ```powershell
-pip install "pdfplumber==0.7.6" "pdfminer.six==20211018"
+pip install "pdfplumber==0.7.6" "pdfminer.six==20211012"
 ```
 
-`pdfminer.six 20211018` (Oct 2021) est antérieur à l'ajout de `cryptography` comme
+`pdfminer.six 20211012` (Oct 2021) est antérieur à l'ajout de `cryptography` comme
 dépendance. Toutes les APIs utilisées (`extract_text`, `extract_tables`) sont
 disponibles dans cette version.
 

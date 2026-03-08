@@ -17,7 +17,7 @@ ollama>=0.2.0                     # optionnel (local)
 #   couvrent toutes les APIs utilisées (open, extract_text, extract_tables)
 #   sans aucune dépendance cryptography.
 pdfplumber>=0.7.0,<0.9.0
-pdfminer.six>=20201018,<20220506
+pdfminer.six>=20211012,<20220506
 PyMuPDF>=1.24.0                   # fitz — scan structurel
 pdf2image>=1.17.0                 # conversion pages → images (OCR)
 pytesseract>=0.3.10               # OCR texte
