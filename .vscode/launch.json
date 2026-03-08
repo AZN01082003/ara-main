@@ -6,7 +6,7 @@
       "type": "python",
       "request": "launch",
       "module": "uvicorn",
-      "args": ["api.server:app", "--reload", "--port", "8000"],
+      "args": ["api.server:app", "--port", "8000"],
       "envFile": "${workspaceFolder}/.env",
       "console": "integratedTerminal",
       "justMyCode": false

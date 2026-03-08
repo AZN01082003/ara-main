@@ -72,10 +72,21 @@ GEMINI_API_KEY=AIza...votre_clé...
 ### Option A — Terminal VS Code intégré
 
 ```bash
+# Windows — sans --reload (obligatoire, voir note ci-dessous)
+uvicorn api.server:app --port 8000
+
+# Linux / macOS — --reload optionnel
 uvicorn api.server:app --reload --port 8000
 ```
 
 Ouvrez ensuite **http://localhost:8000** dans votre navigateur.
+
+> **Windows — pourquoi pas `--reload` ?**
+> Sur Windows, `--reload` spawne un sous-process via `multiprocessing.spawn`.
+> Ce spawn réimporte toute l'app, y compris les extensions PyO3 de `cryptography`,
+> ce qui déclenche : *"PyO3 modules compiled for CPython 3.8 or older may only be initialized once"*.
+> Sans `--reload`, aucun sous-process n'est créé → l'erreur disparaît.
+> Pour recharger l'app après un changement de code : **Ctrl+C** puis relancer.
 
 ### Option B — Configuration de lancement VS Code
 
@@ -182,7 +193,7 @@ ara-main/
 
 | Erreur | Solution |
 |---|---|
-| `PyO3 modules compiled for CPython 3.8 or older` | `pip install --upgrade cryptography` (voir ci-dessous) |
+| `PyO3 modules compiled for CPython 3.8 or older` | Supprimer `--reload` (Windows) — voir section ci-dessous |
 | `ModuleNotFoundError: fitz` | `pip install PyMuPDF` |
 | `tesseract is not installed` | Installer Tesseract + ajouter au PATH |
 | `poppler not found` | Installer Poppler (Windows) ou `apt install poppler-utils` |
@@ -190,23 +201,23 @@ ara-main/
 | Erreur 429 Gemini | Quota dépassé — attendre ou changer de clé |
 | Port 8000 déjà utilisé | `uvicorn api.server:app --port 8001` |
 
-### Erreur PyO3 / cryptography (Python 3.10+)
+### Erreur PyO3 — "initialized once per interpreter process" (Windows)
 
-Si vous obtenez :
 ```
-ImportError: PyO3 modules compiled for CPython 3.8 or older may only be initialized once per interpreter process
+ImportError: PyO3 modules compiled for CPython 3.8 or older
+  may only be initialized once per interpreter process
 ```
 
-`pdfplumber` dépend de `pdfminer.six` qui lui-même dépend de `cryptography`.
-Une ancienne version de `cryptography` (compilée pour Python ≤ 3.8) est incompatible avec Python 3.10/3.11. Corrigez avec :
+**Cause réelle** : sur Windows, `uvicorn --reload` utilise `multiprocessing.spawn`
+pour lancer un sous-process de rechargement. Ce spawn réimporte l'application entière,
+y compris l'extension Rust/PyO3 de `cryptography`, qui ne supporte pas d'être
+initialisée deux fois dans le même cycle de processus.
 
+**Fix** : supprimer `--reload` :
 ```bash
-pip install --upgrade cryptography
-# puis relancez :
-uvicorn api.server:app --reload --port 8000
+uvicorn api.server:app --port 8000
 ```
 
-> Si l'erreur persiste, vérifiez que vous n'avez **pas** Python 3.8 actif dans votre venv :
-> ```bash
-> python --version   # doit afficher 3.10 ou 3.11
-> ```
+Après un changement de code : **Ctrl+C** + relancer la commande.
+
+> La configuration **F5** de `.vscode/launch.json` ne contient pas `--reload` — elle fonctionne directement.
