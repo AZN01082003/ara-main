@@ -193,7 +193,7 @@ ara-main/
 
 | Erreur | Solution |
 |---|---|
-| `PyO3 modules compiled for CPython 3.8 or older` | `pip install "pdfplumber==0.7.6" "pdfminer.six==20211012"` — voir ci-dessous |
+| `PyO3 modules compiled for CPython 3.8 or older` | Déjà corrigé — `pdfplumber` supprimé, PyMuPDF seul utilisé |
 | `ModuleNotFoundError: fitz` | `pip install PyMuPDF` |
 | `tesseract is not installed` | Installer Tesseract + ajouter au PATH |
 | `poppler not found` | Installer Poppler (Windows) ou `apt install poppler-utils` |
@@ -214,21 +214,9 @@ extensions Rust compilées avec PyO3 via le stable ABI `abi3-cp38`. Sur
 **Python 3.10.0rc1** (release candidate), la détection de version de PyO3 présente
 un bug et refuse de charger ces wheels.
 
-**Fix — réinstaller les seuls paquets concernés** :
+**Fix appliqué dans le code** : `pdfplumber` et `pdfminer.six` ont été supprimés
+du projet. `pdf_extractor.py` utilise maintenant **PyMuPDF uniquement** via
+`page.find_tables()` (disponible depuis PyMuPDF 1.23), qui offre la même API
+et ne dépend pas de `cryptography`.
 
-```powershell
-pip install "pdfplumber==0.7.6" "pdfminer.six==20211012"
-```
-
-`pdfminer.six 20211012` (Oct 2021) est antérieur à l'ajout de `cryptography` comme
-dépendance. Toutes les APIs utilisées (`extract_text`, `extract_tables`) sont
-disponibles dans cette version.
-
-Puis relancer :
-```powershell
-uvicorn api.server:app --port 8000
-```
-
-> **Solution définitive** : installer [Python 3.10.11](https://www.python.org/downloads/release/python-31011/)
-> (ou 3.11.x), recréer le venv et relancer `pip install -r requirements.txt`.
-> Les versions stables `3.10.x` n'ont pas ce bug.
+Aucune action requise — `pip install -r requirements.txt` suffit.

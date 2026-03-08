@@ -12,13 +12,10 @@ huggingface-hub>=0.22.0           # optionnel
 ollama>=0.2.0                     # optionnel (local)
 
 # ─── Extraction PDF ───────────────────────────────────────────────────────────
-# pdfplumber >= 0.9 exige pdfminer.six >= 20220524 qui ajoute cryptography (PyO3)
-# → bug fatal sur Python 3.10.0rc1. pdfplumber 0.7.6 + pdfminer.six 20211018
-#   couvrent toutes les APIs utilisées (open, extract_text, extract_tables)
-#   sans aucune dépendance cryptography.
-pdfplumber>=0.7.0,<0.9.0
-pdfminer.six>=20211012,<20220506
-PyMuPDF>=1.24.0                   # fitz — scan structurel
+# PyMuPDF gère texte ET tableaux (page.find_tables() >= 1.23).
+# pdfplumber/pdfminer.six supprimés : leur dépendance cryptography (PyO3 abi3)
+# est incompatible avec Python 3.10.0rc1.
+PyMuPDF>=1.24.0                   # fitz — texte, tableaux, scan structurel
 pdf2image>=1.17.0                 # conversion pages → images (OCR)
 pytesseract>=0.3.10               # OCR texte
 Pillow>=10.3.0

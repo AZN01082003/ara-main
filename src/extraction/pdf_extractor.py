@@ -1,55 +1,48 @@
+"""
+PDFExtractor — extraction texte + tableaux via PyMuPDF (fitz) uniquement.
+
+Remplace l'ancienne dépendance pdfplumber/pdfminer.six (qui amenait cryptography,
+incompatible avec Python 3.10.0rc1 via PyO3 abi3).
+PyMuPDF >= 1.23 offre page.find_tables() avec un format de sortie identique
+à pdfplumber.extract_tables() : list[list[list[str | None]]].
+"""
+
 import json
-import fitz  # PyMuPDF
-import pdfplumber
+import re
+import fitz  # PyMuPDF — déjà requis pour le scan structurel
 from pathlib import Path
 from typing import List, Dict
 
 
 class PDFExtractor:
-    """Classe pour extraire le texte des PDF (scientifiques ou financiers)"""
+    """Extraction texte + tableaux depuis un PDF (scientifique ou financier)."""
 
     def __init__(self, pdf_path):
         self.pdf_path = Path(pdf_path)
 
     # ------------------------------------------------------------------
-    # Méthodes d'extraction génériques (inchangées)
+    # Méthodes d'extraction génériques
     # ------------------------------------------------------------------
 
-    def extract_with_pymupdf(self):
-        """Méthode 1 : Extraction rapide avec PyMuPDF"""
+    def extract_with_pymupdf(self) -> str:
+        """Extraction rapide du texte brut page par page."""
         text = ""
-        doc = fitz.open(self.pdf_path)
-
-        for page_num in range(len(doc)):
-            page = doc[page_num]
-            text += f"\n--- Page {page_num + 1} ---\n"
-            text += page.get_text()
-
-        doc.close()
-        return text
-
-    def extract_with_pdfplumber(self):
-        """Méthode 2 : Meilleure pour les tableaux (texte brut uniquement)"""
-        text = ""
-
-        with pdfplumber.open(self.pdf_path) as pdf:
-            for page_num, page in enumerate(pdf.pages):
+        with fitz.open(str(self.pdf_path)) as doc:
+            for page_num, page in enumerate(doc):
                 text += f"\n--- Page {page_num + 1} ---\n"
-                page_text = page.extract_text() or ""
-                text += page_text
-
+                text += page.get_text("text")
         return text
 
-    def extract_tables(self):
-        """Extrait uniquement les tableaux du PDF (liste brute pdfplumber)"""
+    def extract_with_pdfplumber(self) -> str:
+        """Alias de extract_with_pymupdf (compatibilité API publique)."""
+        return self.extract_with_pymupdf()
+
+    def extract_tables(self) -> list:
+        """Extrait tous les tableaux du PDF (format brut : list[list[list]])."""
         tables = []
-
-        with pdfplumber.open(self.pdf_path) as pdf:
-            for page in pdf.pages:
-                page_tables = page.extract_tables()
-                if page_tables:
-                    tables.extend(page_tables)
-
+        with fitz.open(str(self.pdf_path)) as doc:
+            for page in doc:
+                tables.extend(self._get_page_tables(page))
         return tables
 
     # ------------------------------------------------------------------
@@ -70,22 +63,21 @@ class PDFExtractor:
         """
         pages_content = []
 
-        with pdfplumber.open(self.pdf_path) as pdf:
-            for page_num, page in enumerate(pdf.pages):
+        with fitz.open(str(self.pdf_path)) as doc:
+            for page_num, page in enumerate(doc):
                 page_parts = [f"\n--- Page {page_num + 1} ---\n"]
 
                 # Texte narratif de la page
-                page_text = page.extract_text() or ""
+                page_text = page.get_text("text") or ""
                 if page_text.strip():
                     page_parts.append(page_text)
 
                 # Tableaux de la page → Markdown structuré
-                page_tables = page.extract_tables()
-                if page_tables:
-                    for t_idx, table in enumerate(page_tables):
-                        md = self._table_to_markdown(table, page_num + 1, t_idx + 1)
-                        if md:
-                            page_parts.append(md)
+                page_tables = self._get_page_tables(page)
+                for t_idx, table in enumerate(page_tables):
+                    md = self._table_to_markdown(table, page_num + 1, t_idx + 1)
+                    if md:
+                        page_parts.append(md)
 
                 pages_content.append("\n".join(page_parts))
 
@@ -102,11 +94,9 @@ class PDFExtractor:
         """
         all_tables = []
 
-        with pdfplumber.open(self.pdf_path) as pdf:
-            for page_num, page in enumerate(pdf.pages):
-                page_tables = page.extract_tables()
-                if not page_tables:
-                    continue
+        with fitz.open(str(self.pdf_path)) as doc:
+            for page_num, page in enumerate(doc):
+                page_tables = self._get_page_tables(page)
 
                 for t_idx, table in enumerate(page_tables):
                     if not table or len(table) == 0:
@@ -141,8 +131,19 @@ class PDFExtractor:
     # Helpers
     # ------------------------------------------------------------------
 
+    def _get_page_tables(self, page) -> list:
+        """
+        Extrait les tableaux d'une page fitz.
+        Retourne list[list[list[str|None]]] — même format que pdfplumber.
+        """
+        try:
+            finder = page.find_tables()
+            return [t.extract() for t in finder.tables]
+        except Exception:
+            return []
+
     def _table_to_markdown(self, table: list, page_num: int, table_idx: int) -> str:
-        """Convertit un tableau pdfplumber en Markdown structuré avec balises."""
+        """Convertit un tableau en Markdown structuré avec balises."""
         if not table or len(table) == 0:
             return ""
 
@@ -157,7 +158,6 @@ class PDFExtractor:
         # Lignes de données
         for row in table[1:]:
             cells = [str(cell).strip() if cell else "" for cell in row]
-            # Aligner sur la largeur de l'en-tête
             while len(cells) < len(header_cells):
                 cells.append("")
             lines.append("| " + " | ".join(cells) + " |")
@@ -166,8 +166,6 @@ class PDFExtractor:
         return "\n".join(lines)
 
     def _count_tables(self, text: str) -> int:
-        """Compte le nombre de balises TABLE dans le texte."""
-        import re
         return len(re.findall(r'\[TABLE ', text))
 
     # ------------------------------------------------------------------
@@ -175,24 +173,16 @@ class PDFExtractor:
     # ------------------------------------------------------------------
 
     def save_text(self, text: str, output_path: str):
-        """Sauvegarde le texte extrait."""
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(text)
-
         print(f"   ✅ Texte sauvegardé dans : {output_path}")
 
     def save_tables_json(self, tables: List[Dict], output_path: str):
-        """Sauvegarde les tableaux JSON extraits."""
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Enlever 'raw' (listes imbriquées non JSON-friendly) avant sauvegarde
         clean_tables = [{k: v for k, v in t.items() if k != "raw"} for t in tables]
-
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(clean_tables, f, indent=2, ensure_ascii=False)
-
         print(f"   ✅ Tableaux JSON sauvegardés dans : {output_path}")
