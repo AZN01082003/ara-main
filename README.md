@@ -193,7 +193,7 @@ ara-main/
 
 | Erreur | Solution |
 |---|---|
-| `PyO3 modules compiled for CPython 3.8 or older` | Supprimer `--reload` (Windows) — voir section ci-dessous |
+| `PyO3 modules compiled for CPython 3.8 or older` | `pip install "pdfplumber==0.7.6" "pdfminer.six==20211018"` — voir ci-dessous |
 | `ModuleNotFoundError: fitz` | `pip install PyMuPDF` |
 | `tesseract is not installed` | Installer Tesseract + ajouter au PATH |
 | `poppler not found` | Installer Poppler (Windows) ou `apt install poppler-utils` |
@@ -201,23 +201,34 @@ ara-main/
 | Erreur 429 Gemini | Quota dépassé — attendre ou changer de clé |
 | Port 8000 déjà utilisé | `uvicorn api.server:app --port 8001` |
 
-### Erreur PyO3 — "initialized once per interpreter process" (Windows)
+### Erreur PyO3 — "initialized once per interpreter process"
 
 ```
 ImportError: PyO3 modules compiled for CPython 3.8 or older
   may only be initialized once per interpreter process
 ```
 
-**Cause réelle** : sur Windows, `uvicorn --reload` utilise `multiprocessing.spawn`
-pour lancer un sous-process de rechargement. Ce spawn réimporte l'application entière,
-y compris l'extension Rust/PyO3 de `cryptography`, qui ne supporte pas d'être
-initialisée deux fois dans le même cycle de processus.
+**Cause réelle** : `pdfplumber ≥ 0.9` exige `pdfminer.six ≥ 20220524`, qui a
+introduit une dépendance vers `cryptography`. `cryptography ≥ 38` utilise des
+extensions Rust compilées avec PyO3 via le stable ABI `abi3-cp38`. Sur
+**Python 3.10.0rc1** (release candidate), la détection de version de PyO3 présente
+un bug et refuse de charger ces wheels.
 
-**Fix** : supprimer `--reload` :
-```bash
+**Fix — réinstaller les seuls paquets concernés** :
+
+```powershell
+pip install "pdfplumber==0.7.6" "pdfminer.six==20211018"
+```
+
+`pdfminer.six 20211018` (Oct 2021) est antérieur à l'ajout de `cryptography` comme
+dépendance. Toutes les APIs utilisées (`extract_text`, `extract_tables`) sont
+disponibles dans cette version.
+
+Puis relancer :
+```powershell
 uvicorn api.server:app --port 8000
 ```
 
-Après un changement de code : **Ctrl+C** + relancer la commande.
-
-> La configuration **F5** de `.vscode/launch.json` ne contient pas `--reload` — elle fonctionne directement.
+> **Solution définitive** : installer [Python 3.10.11](https://www.python.org/downloads/release/python-31011/)
+> (ou 3.11.x), recréer le venv et relancer `pip install -r requirements.txt`.
+> Les versions stables `3.10.x` n'ont pas ce bug.

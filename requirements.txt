@@ -11,13 +11,13 @@ groq>=0.8.0                       # optionnel
 huggingface-hub>=0.22.0           # optionnel
 ollama>=0.2.0                     # optionnel (local)
 
-# ─── Compatibilité Python 3.10+ ──────────────────────────────────────────────
-# pdfminer.six (dep de pdfplumber) embarque cryptography ; forcer >=41 évite
-# "PyO3 modules compiled for CPython 3.8 or older" sur Python 3.10/3.11.
-cryptography>=41.0.0
-
 # ─── Extraction PDF ───────────────────────────────────────────────────────────
-pdfplumber>=0.11.0
+# pdfplumber >= 0.9 exige pdfminer.six >= 20220524 qui ajoute cryptography (PyO3)
+# → bug fatal sur Python 3.10.0rc1. pdfplumber 0.7.6 + pdfminer.six 20211018
+#   couvrent toutes les APIs utilisées (open, extract_text, extract_tables)
+#   sans aucune dépendance cryptography.
+pdfplumber>=0.7.0,<0.9.0
+pdfminer.six>=20201018,<20220506
 PyMuPDF>=1.24.0                   # fitz — scan structurel
 pdf2image>=1.17.0                 # conversion pages → images (OCR)
 pytesseract>=0.3.10               # OCR texte
